@@ -1,6 +1,6 @@
 /* eslint-disable react/prop-types */
-/* eslint-disable no-unused-vars */
 import { useEffect, useState } from "react";
+import StarRating from "./StarRating";
 
 const getAvarage = (array) =>
   array.reduce((sum, value) => sum + value / array.length, 0);
@@ -10,18 +10,42 @@ const api_key = "0d01f8e1e9324f8866f06cff2f181401";
 export default function App() {
   const [query, setQuery] = useState("");
   const [movies, setMovies] = useState([]);
-  const [selectedMovie, setSelectedMovie] = useState([]);
+  const [selectedMovies, setSelectedMovies] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selectedMovie, setSelectedMovie] = useState(null);
+
+  function handleSelectedMovie(id) {
+    setSelectedMovie((selectedMovie) => (id === selectedMovie ? null : id));
+  }
+
+  function handleUnselectMovie() {
+    setSelectedMovie(null);
+  }
+
+  function handleAddToList(movie) {
+    setSelectedMovies((selectedMovies) => [...selectedMovies, movie]);
+    handleUnselectMovie();
+  }
+
+  function handleDeleteFromList(id) {
+    setSelectedMovies((selectedMovies) =>
+      selectedMovies.filter((m) => m.id !== id)
+    );
+  }
 
   useEffect(
     function () {
+      const controller = new AbortController();
+      const signal = controller.signal;
+
       async function getMovies() {
         try {
           setLoading(true);
           setError("");
           const res = await fetch(
-            `https://api.themoviedb.org/3/search/movie?api_key=${api_key}&query=${query}`
+            `https://api.themoviedb.org/3/search/movie?api_key=${api_key}&query=${query}`,
+            { signal: signal }
           );
 
           if (!res.ok) {
@@ -36,7 +60,9 @@ export default function App() {
 
           setMovies(data.results);
         } catch (err) {
-          setError(err.message);
+          if (err.name !== "AbortError") {
+            setError(err.message);
+          }
         }
         setLoading(false);
       }
@@ -48,6 +74,10 @@ export default function App() {
       }
 
       getMovies();
+
+      return () => {
+        controller.abort();
+      };
     },
     [query]
   );
@@ -64,16 +94,34 @@ export default function App() {
           <div className="col-md-9">
             <ListContainer>
               {loading && <Loading />}
-              {!loading && !error && <MovieList movies={movies} />}
+              {!loading && !error && (
+                <MovieList
+                  movies={movies}
+                  onSelectMovie={handleSelectedMovie}
+                  selectedMovie={selectedMovie}
+                />
+              )}
               {error && <ErrorMessage message={error} />}
             </ListContainer>
           </div>
           <div className="col-md-3">
             <ListContainer>
-              <>
-                <MyListSummary selectedMovie={selectedMovie} />
-                <MyMovieList selectedMovie={selectedMovie} />
-              </>
+              {selectedMovie ? (
+                <MovieDetails
+                  onAddToList={handleAddToList}
+                  selectedMovie={selectedMovie}
+                  onUnselectMovie={handleUnselectMovie}
+                  selectedMovies={selectedMovies}
+                />
+              ) : (
+                <>
+                  <MyListSummary selectedMovies={selectedMovies} />
+                  <MyMovieList
+                    selectedMovies={selectedMovies}
+                    onDeleteFromList={handleDeleteFromList}
+                  />
+                </>
+              )}
             </ListContainer>
           </div>
         </div>
@@ -158,20 +206,144 @@ function ListContainer({ children }) {
   );
 }
 
-function MovieList({ movies }) {
+function MovieList({ movies, onSelectMovie, selectedMovie }) {
   return (
     <div className="row row-cols-1 row-cols-md-3 row-cols-xl-4 g-4">
       {movies.map((movie) => (
-        <Movie movie={movie} key={movie.id} />
+        <Movie
+          movie={movie}
+          key={movie.id}
+          onSelectMovie={onSelectMovie}
+          selectedMovie={selectedMovie}
+        />
       ))}
     </div>
   );
 }
 
-function Movie({ movie }) {
+function MovieDetails({
+  selectedMovie,
+  onUnselectMovie,
+  onAddToList,
+  selectedMovies,
+}) {
+  const [movie, setMovie] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [userRating, setUserRating] = useState("");
+
+  const isAddedToList = selectedMovies
+    .map((movie) => movie.id)
+    .includes(selectedMovie);
+
+  const selectedMoiveUserRating = selectedMovies.find(
+    (m) => m.id === selectedMovie
+  )?.userRating;
+
+  function handleAddToList() {
+    const newMovie = {
+      ...movie,
+      userRating,
+    };
+    onAddToList(newMovie);
+  }
+
+  useEffect(
+    function () {
+      async function getMovieDetails() {
+        setLoading(true);
+        const res = await fetch(
+          `https://api.themoviedb.org/3/movie/${selectedMovie}?api_key=${api_key}`
+        );
+        const data = await res.json();
+        setMovie(data);
+        setLoading(false);
+      }
+      getMovieDetails();
+    },
+    [selectedMovie]
+  );
+
+  return (
+    <>
+      {loading ? (
+        <Loading />
+      ) : (
+        <div className="border p-2 mb-3 ">
+          <div className="row">
+            <div className="col-4">
+              <img
+                src={
+                  movie.poster_path
+                    ? `https://media.themoviedb.org/t/p/w440_and_h660_face` +
+                      movie.poster_path
+                    : "/img/no-image.jpg"
+                }
+                alt={movie.title}
+                className="img-fluid rounded"
+              />
+            </div>
+            <div className="col-8">
+              <h6>{movie.title}</h6>
+              <p>
+                <i className="bi bi-calendar2-date me-1"></i>
+                <span>{movie.release_date}</span>
+              </p>
+              <p>
+                <i className="bi bi-star-fill text-warning"></i>
+                <span>{movie.vote_average}</span>
+              </p>
+            </div>
+            <div className="col-12 border-top p-3 mt-3">
+              <p>{movie.overview}</p>
+              <p>
+                {movie?.genres?.map((genre) => (
+                  <span key={genre.id} className="badge text-bg-primary me-1">
+                    {genre.name}
+                  </span>
+                )) || "No genres available"}
+              </p>
+              {!isAddedToList ? (
+                <>
+                  <StarRating
+                    maxRating={10}
+                    size={20}
+                    onRating={setUserRating}
+                  />
+                  <button
+                    className="btn btn-primary mt-4 me-1"
+                    onClick={() => handleAddToList(movie)}
+                  >
+                    Listeye Ekle
+                  </button>
+                </>
+              ) : (
+                <p>
+                  Film listenizde. Değerlendirme :
+                  <i className="bi bi-stars text-warning me-1"></i>
+                  {selectedMoiveUserRating}
+                </p>
+              )}
+
+              <button className="btn btn-danger mt-4" onClick={onUnselectMovie}>
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Movie({ movie, onSelectMovie, selectedMovie }) {
   return (
     <div className="col mb-2">
-      <div className="card">
+      <div
+        className={`card movie ${
+          selectedMovie === movie.id ? "selected-movie" : ""
+        }`}
+        onClick={() => onSelectMovie(movie.id)}
+      >
         <img
           src={
             movie.poster_path
@@ -194,17 +366,26 @@ function Movie({ movie }) {
   );
 }
 
-function MyListSummary({ selectedMovie }) {
-  const avgRating = getAvarage(selectedMovie.map((movie) => movie.rating));
-  const avgDuration = getAvarage(selectedMovie.map((movie) => movie.duration));
+function MyListSummary({ selectedMovies }) {
+  const avgRating = getAvarage(
+    selectedMovies.map((movie) => movie.vote_average)
+  );
+  const avgUserRating = getAvarage(
+    selectedMovies.map((movie) => movie.userRating)
+  );
+  const avgDuration = getAvarage(selectedMovies.map((movie) => movie.runtime));
   return (
     <div className="card mb-2">
       <div className="card-body">
-        <h5>Listeye [{selectedMovie.length}] film ekledi.</h5>
+        <h5>Listeye [{selectedMovies.length}] film ekledi.</h5>
         <div className="d-flex justify-content-between">
           <p>
             <i className="bi bi-star-fill text-warning me-1"></i>
             <span>{avgRating.toFixed(2)}</span>
+          </p>
+          <p>
+            <i className="bi bi-stars text-warning me-1"></i>
+            <span>{avgUserRating.toFixed(2)}</span>
           </p>
           <p>
             <i className="bi bi-hourglass-split text-info me-1"></i>
@@ -216,36 +397,51 @@ function MyListSummary({ selectedMovie }) {
   );
 }
 
-function MyMovieList({ selectedMovie }) {
-  return selectedMovie.map((movie) => (
-    <MyListMovie key={movie.Id} movie={movie} />
+function MyMovieList({ selectedMovies, onDeleteFromList }) {
+  return selectedMovies.map((movie) => (
+    <MyListMovie
+      key={movie.id}
+      movie={movie}
+      onDeleteFromList={onDeleteFromList}
+    />
   ));
 }
 
-function MyListMovie({ movie }) {
+function MyListMovie({ movie, onDeleteFromList }) {
   return (
     <div className="card mb-2">
       <div className="row">
         <div className="col-4">
           <img
-            src={movie.Poster}
-            alt={movie.Title}
+            src={
+              movie.poster_path
+                ? `https://media.themoviedb.org/t/p/w440_and_h660_face` +
+                  movie.poster_path
+                : "/img/no-image.jpg"
+            }
+            alt={movie.title}
             className="img-fluid rounded-start"
           />
         </div>
         <div className="col-8">
           <div className="card-body">
-            <h6 className="card-title">{movie.Title}</h6>
+            <h6 className="card-title">{movie.title}</h6>
             <div className="d-flex justify-content-between">
               <p>
                 <i className="bi bi-star-fill text-warning me-1"></i>
-                <span>{movie.rating}</span>
+                <span>{movie.vote_average}</span>
               </p>
               <p>
-                <i className="bi bi-hourglass text-info me-1"></i>
-                <span>{movie.duration} dk</span>
+                <i className="bi bi-hourglass text-warning me-1"></i>
+                <span>{movie.runtime} dk</span>
               </p>
             </div>
+            <button
+              className="btn btn-danger"
+              onClick={() => onDeleteFromList(movie.id)}
+            >
+              Sil
+            </button>
           </div>
         </div>
       </div>
